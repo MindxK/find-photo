@@ -216,3 +216,38 @@ def run(job_id, source):
         with _guard:
             _pending.pop(job_id, None)
             _launch_next()
+
+
+
+def resume_after_restart():
+    """Consume an operator-created restart plan, scoped to existing accounts/jobs."""
+    from . import auth
+    from .config import DATA
+    plan = DATA / 'resume-scans.json'
+    if not plan.exists():
+        return
+    report = []
+    try:
+        entries = json.loads(plan.read_text(encoding='utf-8'))
+        if not isinstance(entries, list) or len(entries) > 30:
+            raise ValueError('Invalid restart plan')
+        with auth.connect() as c:
+            scopes = {r[0] for r in c.execute('SELECT scope FROM users')}
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get('scope') not in scopes:
+                report.append({'status':'rejected'})
+                continue
+            with db.workspace(entry['scope']):
+                old = db.one('SELECT source_id,status FROM jobs WHERE id=?', (entry.get('job_id'),))
+                if not old or old['source_id'] != entry.get('source_id') or old['status'] != 'interrupted':
+                    report.append({'old_job_id':entry.get('job_id'), 'status':'skipped'})
+                    continue
+                try:
+                    job_id = start(old['source_id'])
+                    report.append({'scope':entry['scope'], 'old_job_id':entry['job_id'], 'job_id':job_id, 'status':'resumed'})
+                except (ValueError, OSError) as error:
+                    report.append({'old_job_id':entry['job_id'], 'status':'failed', 'error':str(error)})
+    except (ValueError, OSError) as error:
+        report.append({'status':'failed','error':str(error)})
+    (DATA / 'resumed-scans.json').write_text(json.dumps(report), encoding='utf-8')
+    plan.unlink(missing_ok=True)

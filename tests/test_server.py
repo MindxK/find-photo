@@ -229,3 +229,29 @@ def test_web_client_update_preserves_owner_data(accounts):
     with db.workspace(b['scope']):
         assert drive.authorization_config()['client_id'] == 'web.apps.googleusercontent.com'
         assert db.setting('google_token') is None
+
+
+def test_planned_restart_resumes_only_selected_interrupted_jobs(accounts, monkeypatch):
+    import json
+    from backend.config import DATA
+    _, _, a, b = accounts
+    plan=[]; calls=[]
+    for index,user in enumerate((a,b)):
+        with db.workspace(user['scope']):
+            db.execute('INSERT INTO sources VALUES(?,?,?,?,?,?,?)',('s','album','drive','root','',time.time(),None))
+            db.execute('INSERT INTO jobs(id,source_id,status,phase,created) VALUES(?,?,?,?,?)',('old','s','interrupted','test',time.time()))
+            db.execute('INSERT INTO jobs(id,source_id,status,phase,created) VALUES(?,?,?,?,?)',('done','s','completed','test',time.time()))
+        plan.append({'scope':user['scope'],'job_id':'old','source_id':'s'})
+    plan.extend([{'scope':a['scope'],'job_id':'done','source_id':'s'}, {'scope':'../outside','job_id':'old','source_id':'s'}])
+    (DATA/'resume-scans.json').write_text(json.dumps(plan))
+    def start(source):
+        calls.append((db.scope_key(),source))
+        return 'resumed-'+db.scope_key()
+    monkeypatch.setattr(jobs,'start',start)
+    jobs.resume_after_restart()
+    assert calls == [(a['scope'],'s'),(b['scope'],'s')]
+    assert not (DATA/'resume-scans.json').exists()
+    jobs.resume_after_restart()
+    assert len(calls)==2
+    report=json.loads((DATA/'resumed-scans.json').read_text())
+    assert [row['status'] for row in report]==['resumed','resumed','skipped','rejected']

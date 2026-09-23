@@ -131,4 +131,4 @@ Tests ใช้ฐานข้อมูลชั่วคราวและ embe
 
 ## ใช้เครื่อง Windows เป็นเซิร์ฟเวอร์หลายบัญชี
 
-เปิดด้วย `Start-Server.cmd` และหยุดด้วย `Stop-Server.cmd` มีบัญชีเจ้าของ คำเชิญใช้ครั้งเดียว ฐานข้อมูลและ Google Drive แยกตามผู้ใช้ พร้อมคิวสแกนและ HTTPS ผ่าน Cloudflare Quick Tunnel ดูขั้นตอน Google OAuth การเปิดอัตโนมัติ และข้อจำกัดลิงก์ฟรีใน [คู่มือ Windows Server](deploy/WINDOWS-SERVER.md)
+เปิดด้วย `Start-Server.cmd` และหยุดด้วย `Stop-Server.cmd` มีบัญชีเจ้าของ คำเชิญใช้ครั้งเดียว ฐานข้อมูลและ Google Drive แยกตามผู้ใช้ พร้อมคิวสแกนและ HTTPS ผ่าน Tailscale Funnel สำหรับ URL คงที่ หรือ Cloudflare Quick Tunnel สำหรับทดลอง ดูขั้นตอน Google OAuth การเปิดอัตโนมัติ และข้อจำกัดลิงก์ฟรีใน [คู่มือ Windows Server](deploy/WINDOWS-SERVER.md)

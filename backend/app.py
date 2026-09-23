@@ -27,6 +27,7 @@ _preview_slots = threading.BoundedSemaphore(3)
 async def lifespan(app):
     if SERVER_MODE:
         auth.init()
+        jobs.resume_after_restart()
     else:
         db.init()
     yield
