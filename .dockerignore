@@ -1,0 +1,11 @@
+*
+!Dockerfile
+!requirements.lock
+!backend/
+!backend/**
+!web/
+!web/**
+!scripts/
+!scripts/**
+**/__pycache__/
+**/*.pyc

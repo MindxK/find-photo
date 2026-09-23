@@ -123,3 +123,7 @@ Tests ใช้ฐานข้อมูลชั่วคราวและ embe
 สำหรับการเปิดให้หลายคนใช้ ต้องเพิ่ม authentication/authorization รายผู้ใช้, tenant isolation, durable queue, HTTPS, deployment secrets, retention และการประเมิน threshold ก่อนเปิดใช้งาน ห้ามเปลี่ยน bind เป็น `0.0.0.0` แล้วถือว่าเป็นระบบ production
 
 ทดสอบปุ่มแบ่งหน้าและลิงก์ดาวน์โหลดบนเว็บด้วย `node --test tests/test_web.cjs` (ใช้ Node.js)
+
+## ทดลอง Oracle Cloud
+
+มี [คู่มือติดตั้ง Oracle Always Free](deploy/ORACLE.md) พร้อม Dockerfile และ Compose แบบเข้าผ่าน SSH tunnel โดยเก็บข้อมูลใน volume ถาวร ชุดนี้ยังต้องทดสอบ build บน ARM64 VM จริงและยังไม่ใช่เว็บสาธารณะหลายผู้ใช้
