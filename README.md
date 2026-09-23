@@ -127,3 +127,8 @@ Tests ใช้ฐานข้อมูลชั่วคราวและ embe
 ## ทดลอง Oracle Cloud
 
 มี [คู่มือติดตั้ง Oracle Always Free](deploy/ORACLE.md) พร้อม Dockerfile และ Compose แบบเข้าผ่าน SSH tunnel โดยเก็บข้อมูลใน volume ถาวร ชุดนี้ยังต้องทดสอบ build บน ARM64 VM จริงและยังไม่ใช่เว็บสาธารณะหลายผู้ใช้
+
+
+## ใช้เครื่อง Windows เป็นเซิร์ฟเวอร์หลายบัญชี
+
+เปิดด้วย `Start-Server.cmd` และหยุดด้วย `Stop-Server.cmd` มีบัญชีเจ้าของ คำเชิญใช้ครั้งเดียว ฐานข้อมูลและ Google Drive แยกตามผู้ใช้ พร้อมคิวสแกนและ HTTPS ผ่าน Cloudflare Quick Tunnel ดูขั้นตอน Google OAuth การเปิดอัตโนมัติ และข้อจำกัดลิงก์ฟรีใน [คู่มือ Windows Server](deploy/WINDOWS-SERVER.md)

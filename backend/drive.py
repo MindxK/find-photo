@@ -9,7 +9,10 @@ import time
 from urllib.parse import urlencode
 import httpx
 from . import db
-from .config import CALLBACK, MAX_BYTES
+from .config import CALLBACK, MAX_BYTES, SERVER_MODE
+from contextvars import ContextVar
+
+callback_url = ContextVar("callback_url", default=CALLBACK)
 
 SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 BASE = 'https://www.googleapis.com/drive/v3'
@@ -23,14 +26,30 @@ class DriveError(ValueError):
 
 
 def config():
-    return db.setting('google_config', {
-        'client_id': os.getenv('GOOGLE_CLIENT_ID', ''),
-        'client_secret': os.getenv('GOOGLE_CLIENT_SECRET', ''),
-    })
+    own = db.setting('google_config')
+    if own:
+        return own
+    if SERVER_MODE and db.scope_key() != 'legacy':
+        # Share only the OAuth client definition; tokens remain per workspace.
+        with db.workspace('legacy'):
+            shared = db.setting('google_server_config')
+        if shared:
+            return shared
+    return {'client_id': os.getenv('GOOGLE_CLIENT_ID', ''),
+            'client_secret': os.getenv('GOOGLE_CLIENT_SECRET', '')}
+
+
+def authorization_config():
+    if SERVER_MODE:
+        with db.workspace('legacy'):
+            shared = db.setting('google_server_config')
+        if shared:
+            return shared
+    return config()
 
 
 def configured():
-    settings = config()
+    settings = authorization_config()
     return bool(settings.get('client_id') and settings.get('client_secret'))
 
 
@@ -40,10 +59,11 @@ def authorization_url(session):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     db.set_setting('oauth_pending', {'state': state, 'verifier': verifier,
-                                    'session': session, 'expires': time.time() + 600})
+                                    'session': session, 'expires': time.time() + 600,
+                                    'callback': callback_url.get(), 'config': authorization_config()})
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
     return 'https://accounts.google.com/o/oauth2/v2/auth?' + urlencode({
-        'client_id': config()['client_id'], 'redirect_uri': CALLBACK,
+        'client_id': authorization_config()['client_id'], 'redirect_uri': callback_url.get(),
         'response_type': 'code', 'scope': SCOPE, 'state': state,
         'access_type': 'offline', 'prompt': 'consent',
         'code_challenge': challenge, 'code_challenge_method': 'S256',
@@ -57,8 +77,8 @@ def complete_oauth(code, state, session):
         raise ValueError('คำขอเชื่อมต่อหมดอายุหรือไม่ถูกต้อง กรุณาเริ่มเชื่อมต่อใหม่')
     db.execute("DELETE FROM settings WHERE key='oauth_pending'")
     result = httpx.post('https://oauth2.googleapis.com/token', data={
-        **config(), 'code': code, 'code_verifier': pending['verifier'],
-        'redirect_uri': CALLBACK, 'grant_type': 'authorization_code',
+        **pending.get('config', config()), 'code': code, 'code_verifier': pending['verifier'],
+        'redirect_uri': pending.get('callback', CALLBACK), 'grant_type': 'authorization_code',
     }, timeout=30)
     if result.status_code != 200:
         raise ValueError('เชื่อมต่อ Google ไม่สำเร็จ ตรวจ Client ID, Secret และ Redirect URI')
@@ -72,6 +92,7 @@ def complete_oauth(code, state, session):
     # across an account change, even if the next Google account looks similar.
     with db.connect() as c:
         c.execute("DELETE FROM sources WHERE kind='drive'")
+    db.set_setting('google_config', pending.get('config', config()))
     db.set_setting('google_token', token)
     db.changed()
 

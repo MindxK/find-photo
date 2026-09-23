@@ -17,3 +17,19 @@ if MODEL_NAME not in ('buffalo_sc', 'buffalo_l'):
 MODEL_DIR = Path(os.getenv('FIND_FACE_MODEL_DIR') or DATA / 'models' / MODEL_NAME).resolve()
 MODEL_FILES = ('det_500m.onnx', 'w600k_mbf.onnx') if MODEL_NAME == 'buffalo_sc' else ('det_10g.onnx', 'w600k_r50.onnx')
 EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff'}
+
+# Server mode is explicit; the marker is written by Start-Server.cmd.
+SERVER_MODE = os.getenv('FIND_FACE_SERVER', '') == '1' or (DATA / 'server-enabled').exists()
+
+
+def public_origin():
+    import json
+    from urllib.parse import urlsplit
+    try:
+        value = json.loads((DATA / 'server.json').read_text())['public_origin'].rstrip('/')
+        url = urlsplit(value)
+        if url.scheme == 'https' and url.hostname and url.netloc == url.hostname and not url.path and not url.query and not url.fragment:
+            return value
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return ''

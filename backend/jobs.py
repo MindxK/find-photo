@@ -1,4 +1,6 @@
 import concurrent.futures
+from contextvars import copy_context
+from collections import deque
 import hashlib
 import json
 from pathlib import Path
@@ -13,10 +15,25 @@ from .drive import Drive, DriveError
 _guard = threading.Lock()
 _cancel = threading.Event()
 _active = None
+_pending = {}
+_waiting = deque()
 
 
 def busy():
-    return _active is not None
+    return db.scope_key() in _pending.values()
+
+
+def _launch_next():
+    global _active
+    while _waiting:
+        job_id, source, context = _waiting.popleft()
+        if job_id not in _pending:
+            continue
+        _active = job_id
+        _cancel.clear()
+        threading.Thread(target=context.run, args=(run, job_id, source), daemon=True, name='face-scan').start()
+        return
+    _active = None
 
 
 def update(job_id, **values):
@@ -28,8 +45,10 @@ def update(job_id, **values):
 def start(source_id):
     global _active
     with _guard:
-        if _active is not None:
-            raise ValueError('มีงานสแกนกำลังทำงานอยู่ กรุณารอหรือหยุดงานเดิม')
+        if busy():
+            raise ValueError('บัญชีนี้มีงานสแกนอยู่ในคิวแล้ว กรุณารอหรือหยุดงานเดิม')
+        if len(_pending) >= 30:
+            raise ValueError('คิวสแกนเต็ม กรุณาลองใหม่ภายหลัง')
         source = db.one('SELECT * FROM sources WHERE id=?', (source_id,))
         if not source:
             raise ValueError('ไม่พบอัลบั้ม')
@@ -38,17 +57,25 @@ def start(source_id):
         job_id = uuid.uuid4().hex
         db.execute('INSERT INTO jobs(id,source_id,status,phase,created) VALUES(?,?,?,?,?)',
                    (job_id, source_id, 'queued', 'กำลังเตรียมสแกน', time.time()))
-        _active = job_id
-        _cancel.clear()
-        threading.Thread(target=run, args=(job_id, source), daemon=True, name='face-scan').start()
+        _pending[job_id] = db.scope_key()
+        _waiting.append((job_id, source, copy_context()))
+        if _active is None:
+            _launch_next()
+        else:
+            update(job_id, phase='รอคิวประมวลผลบนเซิร์ฟเวอร์')
         return job_id
 
 
 def cancel(job_id):
-    if _active != job_id:
-        raise ValueError('งานนี้ไม่ได้กำลังทำงาน')
-    _cancel.set()
-    update(job_id, status='cancelling', phase='กำลังหยุดหลังประมวลผลภาพปัจจุบัน')
+    with _guard:
+        if _pending.get(job_id) != db.scope_key():
+            raise ValueError('งานนี้ไม่ได้กำลังทำงาน')
+        if _active == job_id:
+            _cancel.set()
+            update(job_id, status='cancelling', phase='กำลังหยุดหลังประมวลผลภาพปัจจุบัน')
+        else:
+            _pending.pop(job_id, None)
+            update(job_id, status='cancelled', phase='ยกเลิกคิวแล้ว', finished=time.time())
 
 
 def local_items(root):
@@ -72,6 +99,8 @@ def get_bytes(source, item):
     if int(item.get('size', 0)) > MAX_BYTES:
         raise ValueError('ไฟล์ใหญ่เกิน 25 MB')
     if source['kind'] == 'local':
+        if db.SERVER_MODE and db.scope_key() != 'legacy':
+            raise ValueError('บัญชีนี้เข้าถึงโฟลเดอร์บนเซิร์ฟเวอร์ไม่ได้')
         root = Path(source['locator']).resolve(strict=True)
         path = Path(item['id']).resolve(strict=True)
         if not path.is_relative_to(root) or path.suffix.lower() not in EXTENSIONS:
@@ -162,7 +191,7 @@ def run(job_id, source):
                     # File names may change without changing image content.
                     db.execute('UPDATE files SET name=? WHERE source_id=? AND remote_id=?', (item['name'], source['id'], item['id']))
                 else:
-                    pending.append((item, version, pool.submit(get_bytes, source, item)))
+                    pending.append((item, version, pool.submit(copy_context().run, get_bytes, source, item)))
                 update(job_id, total=total, skipped=skipped)
                 if len(pending) >= 3:
                     consume()
@@ -185,4 +214,5 @@ def run(job_id, source):
         if drive:
             drive.close()
         with _guard:
-            _active = None
+            _pending.pop(job_id, None)
+            _launch_next()

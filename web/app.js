@@ -43,6 +43,7 @@ async function api(path, {method='GET', body, ...rest} = {}) {
   const headers = method === 'GET' ? {} : {'Content-Type':'application/json', 'X-CSRF-Token':state.csrf};
   const response = await fetch('/api' + path, {method, headers, credentials:'same-origin', ...(body === undefined ? {} : {body:JSON.stringify(body)}), ...rest});
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) { location.replace('/login'); throw new Error('กรุณาเข้าสู่ระบบใหม่'); }
   if (!response.ok) {
     const message = typeof data.detail === 'string' ? data.detail : (Array.isArray(data.detail) ? 'ข้อมูลไม่ครบหรือรูปแบบไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง' : 'ทำรายการไม่สำเร็จ กรุณาลองอีกครั้ง');
     throw new Error(message);
@@ -138,13 +139,21 @@ function jobCards() {
   return '<div class="job-list">'+jobs.map(j=>`<article class="panel job-card"><div class="job-title"><strong>${E(j.source_name||'อัลบั้มที่ลบแล้ว')}</strong><span class="pill ${j.status==='failed'?'red':j.status==='running'?'blue':''}">${labels[j.status]||E(j.status)}</span></div><p>${E(j.phase)}${j.current_file?' · '+E(j.current_file):''}</p><div class="job-metrics"><span>พบ ${number(j.total)} รูป</span><span>ประมวลผล ${number(j.processed)}</span><span>ไม่เปลี่ยนแปลง ${number(j.skipped)}</span><span>อ่านไม่ได้ ${number(j.failed)}</span><span>ใบหน้า ${number(j.faces)}</span></div><div class="progress ${j.status==='running'&&!j.processed?'indeterminate':''}"><span style="width:${j.status==='completed'?100:j.total?Math.min(100,(j.processed+j.skipped)/j.total*100):0}%"></span></div>${j.error?`<div class="notice error" style="margin-top:15px">${E(j.error)}</div>`:''}<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><small class="muted">${date(j.created)}</small>${['running','queued'].includes(j.status)?`<button class="button secondary small" data-action="cancel-job" data-id="${j.id}">หยุดสแกน</button>`:''}</div></article>`).join('')+'</div>';
 }
 function renderActivity() { return pageHead('ประวัติการสแกน', 'ติดตามการประมวลผลภาพ งานที่หยุดสามารถสแกนต่อได้โดยไม่ประมวลผลภาพเดิมซ้ำ') + '<div id="job-list">'+jobCards()+'</div>'; }
-function renderSettings() {
+function renderLegacySettings() {
   const s = state.status || {};
   return pageHead('ตั้งค่าให้พร้อมค้นหา', 'เชื่อมต่อแหล่งภาพและเตรียมโมเดลบนเครื่องของคุณ') + `<div class="settings-grid"><div class="settings-stack"><section class="panel"><div class="panel-header"><h2>${icon('drive')}Google Drive</h2><span class="pill ${s.google_connected?'':'amber'}">${s.google_connected?'เชื่อมต่อแล้ว':'ยังไม่เชื่อมต่อ'}</span></div><div class="panel-body">${s.google_connected?`<div class="setting-line"><div><strong>${E(s.google_user?.displayName||'บัญชี Google ของคุณ')}</strong><p>${E(s.google_user?.emailAddress||'สิทธิ์อ่านไฟล์เท่านั้น')}</p></div><button class="button secondary small" data-action="disconnect">ยกเลิกการเชื่อมต่อ</button></div>`:`<p class="small-copy">อนุญาตให้ FindFace อ่านรูปใน Google Drive ของคุณ โดยไม่แก้ไขหรือลบไฟล์ต้นฉบับ</p><ol class="instruction-list"><li>เปิด <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">Google Cloud Console ${icon('link')}</a> สร้างโปรเจกต์และเปิด Google Drive API</li><li>ตั้งค่า OAuth consent screen เพิ่ม scope <code>drive.readonly</code> และเพิ่มอีเมลของคุณเป็น Test user</li><li>สร้าง OAuth client ชนิด <strong>Web application</strong> แล้วเพิ่ม Redirect URI นี้<div class="code-line"><code id="callback-url">${E(s.callback_url||'http://127.0.0.1:8765/api/google/callback')}</code><button class="icon-button" data-action="copy-callback" aria-label="คัดลอก Redirect URI">${icon('copy')}</button></div></li><li>ดาวน์โหลดไฟล์ Client JSON แล้วเลือกไฟล์ด้านล่าง</li></ol><label class="button secondary oauth-upload" for="oauth-file">${icon('upload')}เลือกไฟล์ OAuth JSON<input type="file" accept=".json,application/json" id="oauth-file" class="sr-only"></label><p class="small-copy">${s.google_configured?'บันทึกข้อมูล OAuth แล้ว พร้อมเชื่อมต่อบัญชี':'Client secret จะถูกเข้ารหัสและเก็บไว้บนเครื่องนี้'}</p><button class="button full" style="margin-top:18px" data-action="connect" ${s.google_configured?'':'disabled'}>${icon('drive')}เชื่อมต่อ Google Drive</button>`}</div></section><section class="panel"><div class="panel-header"><h2>${icon('folder')}เริ่มด้วยรูปบนเครื่อง</h2></div><div class="panel-body"><p class="small-copy">คุณสามารถค้นหารูปจากโฟลเดอร์ในเครื่องได้ทันที โดยไม่ต้องตั้งค่าบัญชี Google</p><button class="button secondary" style="margin-top:17px" data-action="add-local">${icon('plus')}เลือกโฟลเดอร์รูป</button></div></section></div><div class="settings-stack"><section class="panel"><div class="panel-header"><h2>${icon('scan')}โมเดลใบหน้า</h2><span class="pill ${s.model_ready?'':'amber'}" id="model-pill">${s.model_ready?'พร้อมใช้งาน':'ยังไม่ได้ติดตั้ง'}</span></div><div class="panel-body"><div class="status-row"><span>โมเดล</span><strong>ArcFace · InsightFace</strong></div><div class="status-row"><span>เวกเตอร์</span><strong>512 มิติ</strong></div><div class="status-row"><span>ประมวลผล</span><strong>CPU บนเครื่องนี้</strong></div><div class="status-row"><span>ดัชนีค้นหา</span><strong>FAISS · Exact cosine</strong></div><div id="model-install-box">${modelInstallContent()}</div><p class="helper">โมเดล ${E(s.model_name||"buffalo_sc")} ที่แจกโดย InsightFace ใช้สำหรับการวิจัยที่ไม่ใช่เชิงพาณิชย์ หากใช้เชิงพาณิชย์ต้องมีสิทธิ์ใช้งาน weights ที่เหมาะสม</p><a class="small-copy" style="text-decoration:underline" href="https://github.com/deepinsight/insightface/tree/master/python-package" target="_blank" rel="noopener noreferrer">อ่านเงื่อนไขของโมเดล ${icon('link')}</a></div></section><section class="panel"><div class="panel-header"><h2>${icon('shield')}พื้นที่ส่วนตัวของคุณ</h2></div><div class="panel-body"><p class="small-copy">ภาพอ้างอิงใช้ชั่วคราวในหน่วยความจำ เวกเตอร์และ Google tokens ถูกเข้ารหัสก่อนบันทึก ภาพในอัลบั้มแสดงจากตำแหน่งต้นฉบับ</p><p class="small-copy" style="margin-top:12px">การสแกนจะเก็บเวกเตอร์ของทุกใบหน้าในอัลบั้ม รวมถึงคนอื่นในภาพ เลือกเฉพาะอัลบั้มที่คุณมีสิทธิ์ประมวลผล และลบอัลบั้มเพื่อถอนข้อมูลออกจากดัชนีได้ทุกเมื่อ</p><div class="privacy-note">${icon('lock')}<span>ใช้เฉพาะบนเครื่องนี้ · ไม่เปิดรับการเชื่อมต่อจากเครือข่ายภายนอก</span></div></div></section></div></div>`;
+}
+function renderSettings() {
+  const s=state.status;
+  if(!s?.server)return renderLegacySettings();
+  const google=s.google_connected?`<strong>${E(s.google_user?.displayName||'บัญชี Google ของคุณ')}</strong><p>${E(s.google_user?.emailAddress||'')}</p><button class="button secondary" data-action="disconnect">ยกเลิกการเชื่อมต่อ</button>`:`<p>เชื่อมต่อ Google Drive ของคุณเพื่อเลือกอัลบั้มและเริ่มค้นหารูป</p><button class="button" data-action="connect" ${s.google_configured?'':'disabled'}>เชื่อมต่อ Google Drive</button>${!s.google_configured?'<p class="helper">รอเจ้าของเซิร์ฟเวอร์ตั้งค่า Google OAuth</p>':''}`;
+  const admin=s.user?.admin?`<section class="panel"><div class="panel-body"><h2>จัดการเซิร์ฟเวอร์</h2><p>เชิญผู้ใช้ด้วยลิงก์ใช้ครั้งเดียว มีอายุ 24 ชั่วโมง</p><button class="button" data-action="invite-user" ${s.public_url?'':'disabled'}>สร้างลิงก์เชิญ</button><p class="helper">ลิงก์เข้าเว็บ: ${s.public_url?`<a href="${E(s.public_url)}" target="_blank" rel="noopener noreferrer">${E(s.public_url)}</a>`:'กำลังเตรียมลิงก์ภายนอก'}</p><h3>การเชื่อมต่อ Google</h3><p class="helper">เพิ่ม Redirect URI ด้านล่างใน OAuth Client เดิม และเพิ่มอีเมลผู้ใช้ใน Test users หากแอปยังอยู่ในโหมด Testing</p><div class="code-line"><code>${E(s.public_url?s.public_url+'/api/google/callback':s.callback_url)}</code></div><label class="button secondary oauth-upload" for="oauth-file">เปลี่ยนไฟล์ OAuth JSON<input type="file" accept=".json" id="oauth-file" class="sr-only"></label><p class="helper">${s.server_google_configured?'ตั้งค่า Web OAuth แล้ว':'เลือกไฟล์ OAuth ชนิด Web application เพื่อให้สมาชิกเชื่อมต่อ Drive'}</p><h3>รูปบนเครื่องเซิร์ฟเวอร์</h3><button class="button secondary" data-action="add-local">เลือกโฟลเดอร์รูป</button></div></section>`:'';
+  return pageHead('บัญชีและการเชื่อมต่อ','ข้อมูลและ Google Drive ของแต่ละบัญชีแยกกัน')+`<div class="settings-grid"><div class="settings-stack"><section class="panel"><div class="panel-header"><h2>Google Drive ของคุณ</h2></div><div class="panel-body">${google}</div></section>${admin}</div><div class="settings-stack"><section class="panel"><div class="panel-body"><h2>บัญชี ${E(s.user?.username)}</h2><p>ภาพถูกอ่านจาก Google Drive มาประมวลผลในหน่วยความจำบนเซิร์ฟเวอร์ เก็บเฉพาะข้อมูลดัชนีและเวกเตอร์ใบหน้า</p><p>ลบอัลบั้มเพื่อถอนข้อมูลออกจากดัชนีได้ทุกเมื่อ การลบไม่กระทบไฟล์ต้นฉบับ</p><button class="button secondary" data-action="logout">ออกจากระบบ</button></div></section><section class="panel"><div class="panel-body"><h2>ระบบประมวลผล</h2><p>ArcFace · เวกเตอร์ 512 มิติ · FAISS</p><p>งานสแกนเข้าคิวและประมวลผลทีละงานบนเซิร์ฟเวอร์</p><div id="model-install-box">${modelInstallContent()}</div></div></section></div></div>`;
 }
 function modelInstallContent() {
   const s = state.status;
   if (s?.model_ready) return '<p class="notice" style="margin-top:17px;margin-bottom:0">โมเดลพร้อมสำหรับลงทะเบียนและสแกนภาพ</p>';
+  if(s?.server&&!s.user?.admin)return '<p class="notice">รอผู้ดูแลติดตั้งโมเดล</p>';
   const install = s?.model_install;
   if (install?.status==='downloading') return `<p class="small-copy" style="margin-top:15px">${E(install.message)} ${install.progress}%</p><div class="progress"><span style="width:${install.progress}%"></span></div>`;
   return `${install?.status==='error'?`<p class="notice error" style="margin-top:12px">${E(install.message)}</p>`:''}<button class="button full" data-action="install-model" style="margin-top:20px">${icon('download')}ติดตั้งโมเดล · ${s?.model_name==="buffalo_l"?"281":"15"} MB</button>`;
@@ -152,7 +161,13 @@ function modelInstallContent() {
 function render() {
   if (!state.status) { $('#page').innerHTML='<div class="loading-box"><span class="spinner"></span>กำลังเปิดพื้นที่ทำงาน…</div>'; return; }
   const view = ({search:renderSearch,profiles:renderProfiles,albums:renderAlbums,activity:renderActivity,settings:renderSettings})[state.view];
-  $('#page').innerHTML=view(); $('#breadcrumb-current').textContent=titles[state.view];
+  $('#page').innerHTML=view();
+  if(state.status.server){
+    $('#account-controls').innerHTML=`<span>${E(state.status.user?.username)}</span><button class="button secondary small" data-action="logout">ออกจากระบบ</button>`;
+    $('.local-indicator').textContent='เซิร์ฟเวอร์ส่วนตัว';
+    $('.sidebar-bottom p').innerHTML='แยกข้อมูลตามบัญชี<br>เก็บเฉพาะเวกเตอร์ใบหน้า';
+    $('.local-label').textContent='PRIVATE ACCOUNT';
+  } $('#breadcrumb-current').textContent=titles[state.view];
   $$('nav [data-view]').forEach(a=>{a.classList.toggle('active',a.dataset.view===state.view);if(a.dataset.view===state.view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
   $('#nav-profiles').textContent=state.profiles.length;
   $('#header-drive').innerHTML=icon('drive')+(state.status.google_connected?'Drive เชื่อมต่อแล้ว':'เชื่อมต่อ Google Drive');
@@ -224,8 +239,9 @@ async function saveProfile(){
 }
 
 function addSource(kind){
-  state.sourceKind=kind || (state.status.google_connected?'drive':'local');state.folderTrail=[{id:'root',name:'My Drive'}];state.folderDrive='';
+  state.sourceKind=state.status.server&&!state.status.user?.admin?'drive':kind || (state.status.google_connected?'drive':'local');state.folderTrail=[{id:'root',name:'My Drive'}];state.folderDrive='';
   openModal(`<div class="modal-content">${modalHeader('เพิ่มอัลบั้มรูป')}<p>เลือกแหล่งภาพที่ต้องการสแกน รวมถึงโฟลเดอร์ย่อย</p><div class="source-tabs"><button class="source-tab ${state.sourceKind==='local'?'active':''}" data-action="source-tab" data-kind="local">${icon('folder')} ในเครื่องนี้</button><button class="source-tab ${state.sourceKind==='drive'?'active':''}" data-action="source-tab" data-kind="drive">${icon('drive')} Google Drive</button></div><form id="source-form"><label for="source-name">ชื่ออัลบั้ม</label><input class="input" id="source-name" maxlength="100" placeholder="เช่น ทริปเชียงใหม่" required><div id="source-fields"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">ยกเลิก</button><button class="button" type="submit" id="save-source">เพิ่มอัลบั้ม</button></div></form></div>`);
+  if(state.status.server&&!state.status.user?.admin)$('[data-kind="local"]').remove();
   renderSourceFields();$('#source-form').addEventListener('submit',event=>{event.preventDefault();busyButton($('#save-source'),saveSource);});
 }
 async function renderSourceFields(){
@@ -330,6 +346,8 @@ document.addEventListener('click',async event=>{
       case 'cancel-job':await api('/jobs/'+button.dataset.id+'/cancel',{method:'POST'});await refreshData();render();break;
       case 'install-model':await api('/model/install',{method:'POST'});await refreshData();render();toast('เริ่มติดตั้งโมเดลแล้ว');break;
       case 'copy-callback':await navigator.clipboard.writeText(state.status.callback_url);toast('คัดลอก Redirect URI แล้ว');break;
+      case 'logout':await api('/auth/logout',{method:'POST'});location.replace('/login');break;
+      case 'invite-user':{const invite=await api('/auth/invites',{method:'POST'});openModal(`<div class="modal-content">${modalHeader('เชิญเข้า FindFace')}<p>ส่งลิงก์นี้ให้ผู้ที่ต้องการเชิญ ใช้สร้างบัญชีได้ครั้งเดียวภายใน 24 ชั่วโมง</p><div class="invite-link">${E(invite.url)}</div><button class="button" id="copy-invite">คัดลอกลิงก์</button></div>`);$('#copy-invite').onclick=async()=>{await navigator.clipboard.writeText(invite.url);toast('คัดลอกลิงก์เชิญแล้ว');};break;}
       case 'disconnect':if(await confirmAction('ยกเลิกการเชื่อมต่อและลบดัชนีอัลบั้ม Google Drive ทั้งหมด? ไฟล์ใน Drive ไม่ถูกลบ','ยกเลิกการเชื่อมต่อ')){await api('/google/disconnect',{method:'POST'});state.results=null;await refreshData();render();toast('ยกเลิกการเชื่อมต่อแล้ว');}break;
       case 'source-tab':state.sourceKind=button.dataset.kind;await renderSourceFields();break;
       case 'folder-open':state.folderTrail.push({id:button.dataset.id,name:button.dataset.name});await loadFolders();break;
@@ -349,7 +367,7 @@ document.addEventListener('change',async event=>{
     if(element.id==='profile-select'){state.selectedProfile=element.value;state.results=null;render();}
     if(element.id==='oauth-file'){
       const file=element.files[0];if(!file)return;if(file.size>20000)throw new Error('ไฟล์ OAuth JSON มีขนาดใหญ่ผิดปกติ');
-      await api('/google/config',{method:'POST',body:{credentials:await file.text()}});await refreshData();render();toast('บันทึก OAuth แล้ว กดเชื่อมต่อ Google Drive ได้เลย');
+      await api(state.status.server?'/admin/google/config':'/google/config',{method:'POST',body:{credentials:await file.text()}});await refreshData();render();toast('บันทึก OAuth แล้ว กดเชื่อมต่อ Google Drive ได้เลย');
     }
     if(element.id==='drive-select'){state.folderDrive=element.value;state.folderTrail=[{id:element.value||'root',name:element.selectedOptions[0].text}];await loadFolders();}
     if(element.id==='whole-drive'){$('#folder-browser').classList.toggle('hidden',element.checked);$('#folder-id').disabled=element.checked;}
@@ -377,8 +395,8 @@ async function poll(){
     if($('#job-list'))$('#job-list').innerHTML=jobCards();
     if($('#model-install-box'))$('#model-install-box').innerHTML=modelInstallContent();
     if($('#model-pill')){$('#model-pill').textContent=status.model_ready?'พร้อมใช้งาน':'ยังไม่ได้ติดตั้ง';$('#model-pill').classList.toggle('amber',!status.model_ready);}
-    const changed=previous&&(previous.busy!==status.busy||previous.stats.photos!==status.stats.photos||previous.model_ready!==status.model_ready);
-    if(changed){await refreshData();if(['albums','profiles'].includes(state.view))render();if(previous.busy&&!status.busy)toast(status.jobs[0]?.status==='completed'?'สแกนเสร็จแล้ว พร้อมค้นหารูป':'งานสแกนหยุดแล้ว ดูรายละเอียดในประวัติ');}
+    const changed=previous&&(previous.busy!==status.busy||previous.stats.photos!==status.stats.photos||previous.model_ready!==status.model_ready||previous.public_url!==status.public_url);
+    if(changed){await refreshData();if(['albums','profiles','settings'].includes(state.view))render();if(previous.busy&&!status.busy)toast(status.jobs[0]?.status==='completed'?'สแกนเสร็จแล้ว พร้อมค้นหารูป':'งานสแกนหยุดแล้ว ดูรายละเอียดในประวัติ');}
   }catch(error){$('#connection-error').textContent=error.message+' หากปิดโปรแกรมไปแล้ว ให้เปิด FindFace ใหม่';$('#connection-error').classList.remove('hidden');}
   finally{polling=false;}
 }

@@ -5,7 +5,40 @@ import threading
 import time
 from cryptography.fernet import Fernet
 import numpy as np
-from .config import DATA
+from .config import DATA, SERVER_MODE
+from contextvars import ContextVar
+import re
+
+tenant = ContextVar("tenant", default=None)
+
+def scope_key():
+    value = tenant.get()
+    if value is None:
+        if SERVER_MODE:
+            raise RuntimeError("A user workspace is required")
+        return "legacy"
+    return value
+
+
+def workspace_path():
+    scope = scope_key()
+    if scope == "legacy":
+        return DB_PATH
+    if not re.fullmatch(r"[a-f0-9]{32}", scope):
+        raise ValueError("Invalid workspace")
+    directory = DATA / "users" / scope
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "workspace.sqlite3"
+
+
+@contextlib.contextmanager
+def workspace(scope):
+    token = tenant.set(scope)
+    try:
+        yield
+    finally:
+        tenant.reset(token)
+
 
 DB_PATH = DATA / 'findface.sqlite3'
 _key_path = DATA / 'encryption.key'
@@ -22,7 +55,7 @@ revision = 0
 
 @contextlib.contextmanager
 def connect():
-    connection = sqlite3.connect(DB_PATH, timeout=30)
+    connection = sqlite3.connect(workspace_path(), timeout=30)
     connection.row_factory = sqlite3.Row
     connection.execute('PRAGMA foreign_keys=ON')
     try:

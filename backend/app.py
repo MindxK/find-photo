@@ -15,9 +15,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-from . import db, downloads, drive, jobs, models, search, vision
-from .config import ROOT, ORIGIN, CALLBACK, MAX_BYTES, MODEL_NAME
+from . import auth, db, downloads, drive, jobs, models, search, vision
+from .config import ROOT, ORIGIN, CALLBACK, MAX_BYTES, MODEL_NAME, SERVER_MODE, public_origin
+from urllib.parse import urlsplit
 
 _sessions = {}
 _preview_slots = threading.BoundedSemaphore(3)
@@ -25,16 +25,25 @@ _preview_slots = threading.BoundedSemaphore(3)
 
 @asynccontextmanager
 async def lifespan(app):
-    db.init()
+    if SERVER_MODE:
+        auth.init()
+    else:
+        db.init()
     yield
 
 
 app = FastAPI(title='FindFace', docs_url=None, redoc_url=None, lifespan=lifespan)
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost'])
+app.include_router(auth.router)
 
 
 @app.middleware('http')
 async def local_security(request: Request, call_next):
+    public = public_origin() if SERVER_MODE else ''
+    origins = {ORIGIN, ORIGIN.replace('127.0.0.1', 'localhost')}
+    if public:
+        origins.add(public)
+    if request.headers.get('host', '') not in {urlsplit(o).netloc for o in origins}:
+        return JSONResponse({'detail': 'Invalid host'}, status_code=400)
     session_id = request.cookies.get('findface_session', '')
     session = _sessions.get(session_id)
     now = time.time()
@@ -42,36 +51,58 @@ async def local_security(request: Request, call_next):
         _sessions.pop(session_id, None)
         session = None
     new_session = False
-    if request.url.path == '/' and request.method == 'GET' and not session:
+    if request.url.path in ('/', '/login') and request.method == 'GET' and not session:
         for key in list(_sessions):
             if _sessions[key]['expires'] < now:
                 del _sessions[key]
-        if len(_sessions) > 100:
-            _sessions.pop(next(iter(_sessions)))
+        if len(_sessions) >= 2000:
+            return JSONResponse({'detail': 'เซิร์ฟเวอร์มีผู้ใช้มาก กรุณาลองใหม่ภายหลัง'}, status_code=503)
         session_id = secrets.token_urlsafe(32)
         session = {'csrf': secrets.token_urlsafe(32), 'expires': now + 86400}
         _sessions[session_id] = session
         new_session = True
+    user = auth.get_user(session.get('user_id')) if SERVER_MODE and session else None
     if request.url.path.startswith('/api/'):
         if not session:
-            return JSONResponse({'detail': 'เซสชันหมดอายุ กรุณารีเฟรชหน้าเว็บ'}, status_code=401)
+            return JSONResponse({'detail': 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'}, status_code=401)
+        if SERVER_MODE and not user and not request.url.path.startswith('/api/auth/'):
+            return JSONResponse({'detail': 'กรุณาเข้าสู่ระบบ'}, status_code=401)
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
-            allowed_origin = {ORIGIN, ORIGIN.replace('127.0.0.1', 'localhost')}
-            if request.headers.get('origin') not in allowed_origin or not secrets.compare_digest(
+            # Bind mutations to the origin of this request, not another allowed origin.
+            expected_origin = public if public and request.url.hostname == urlsplit(public).hostname else str(request.base_url).rstrip('/')
+            if request.headers.get('origin') != expected_origin or not secrets.compare_digest(
                     request.headers.get('x-csrf-token', ''), session['csrf']):
                 return JSONResponse({'detail': 'คำขอไม่ผ่านการตรวจสอบความปลอดภัย'}, status_code=403)
-            # Read in bounded chunks; JSON references never spool to disk.
             content = bytearray()
+            body_limit = 32768 if request.url.path.startswith('/api/auth/') else 64 * 1024 * 1024
             async for chunk in request.stream():
                 content.extend(chunk)
-                if len(content) > 64 * 1024 * 1024:
-                    return JSONResponse({'detail': 'ข้อมูลอัปโหลดรวมต้องไม่เกิน 64 MB'}, status_code=413)
+                if len(content) > body_limit:
+                    return JSONResponse({'detail': 'ข้อมูลอัปโหลดเกินขนาดที่อนุญาต'}, status_code=413)
             request._body = bytes(content)
     request.state.session_id = session_id
     request.state.csrf = session['csrf'] if session else ''
-    response = await call_next(request)
+    request.state.user = user
+    callback_origin = public if public and request.url.hostname == urlsplit(public).hostname else ORIGIN
+    callback_token = drive.callback_url.set(callback_origin + '/api/google/callback')
+    scope_token = db.tenant.set(user['scope'] if user else (None if SERVER_MODE else 'legacy'))
+    try:
+        response = await call_next(request)
+    finally:
+        db.tenant.reset(scope_token)
+        drive.callback_url.reset(callback_token)
+    if getattr(request.state, 'login_user', None):
+        _sessions.pop(session_id, None)
+        session_id = secrets.token_urlsafe(32)
+        _sessions[session_id] = {'csrf': secrets.token_urlsafe(32), 'expires': now+86400, 'user_id': request.state.login_user}
+        new_session = True
+    if getattr(request.state, 'logout', False):
+        _sessions.pop(session_id, None)
+        response.delete_cookie('findface_session')
+        new_session = False
     if new_session:
-        response.set_cookie('findface_session', session_id, httponly=True, samesite='lax', max_age=86400)
+        response.set_cookie('findface_session', session_id, httponly=True, samesite='lax', max_age=86400,
+                            secure=request.url.hostname not in ('127.0.0.1', 'localhost'))
     response.headers.update({
         'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
@@ -92,8 +123,15 @@ async def network_error(request, exc):
 
 
 @app.get('/')
-def home():
+def home(request: Request):
+    if SERVER_MODE and not request.state.user:
+        return RedirectResponse('/login')
     return FileResponse(ROOT / 'web' / 'index.html')
+
+
+@app.get('/login')
+def login_page():
+    return FileResponse(ROOT / 'web' / 'login.html')
 
 
 @app.get('/api/status')
@@ -105,15 +143,17 @@ def status(request: Request):
         'sources': db.one('SELECT COUNT(*) AS n FROM sources')['n'],
         'errors': db.one("SELECT COUNT(*) AS n FROM files WHERE status='error'")['n'],
     }
-    return {'csrf': request.state.csrf, 'stats': stats, 'model_ready': vision.model_available(), 'model_name': MODEL_NAME,
+    return {'server': SERVER_MODE, 'user': request.state.user, 'public_url': public_origin() if SERVER_MODE else '',
+            'csrf': request.state.csrf, 'stats': stats, 'model_ready': vision.model_available(), 'model_name': MODEL_NAME,
             'model_install': models.state, 'google_configured': drive.configured(),
             'google_connected': bool(db.setting('google_token')), 'google_user': db.setting('google_user', {}),
-            'callback_url': CALLBACK, 'busy': jobs.busy(),
+            'callback_url': drive.callback_url.get(), 'server_google_configured': bool(db.setting('google_server_config')) if request.state.user and request.state.user['admin'] else False, 'busy': jobs.busy(),
             'jobs': db.rows('SELECT jobs.*,sources.name AS source_name FROM jobs LEFT JOIN sources ON sources.id=jobs.source_id ORDER BY jobs.created DESC LIMIT 15')}
 
 
 @app.post('/api/model/install')
-def install_model():
+def install_model(request: Request):
+    auth.require_admin(request)
     if not vision.model_available():
         models.start()
     return {'ok': True}
@@ -141,7 +181,24 @@ def configure_google(payload: OAuthConfig):
         db.execute("DELETE FROM sources WHERE kind='drive'")
         db.changed()
     db.set_setting('google_config', {'client_id': client_id, 'client_secret': secret})
-    return {'ok': True, 'callback_url': CALLBACK}
+    return {'ok': True, 'callback_url': drive.callback_url.get()}
+
+
+@app.post('/api/admin/google/config')
+def configure_server_google(payload: OAuthConfig, request: Request):
+    auth.require_admin(request)
+    if not SERVER_MODE:
+        raise ValueError('เปิดโหมดเซิร์ฟเวอร์ก่อน')
+    try:
+        client = json.loads(payload.credentials)['web']
+        client_id, secret = client['client_id'], client['client_secret']
+        if not isinstance(client_id, str) or not client_id.endswith('.apps.googleusercontent.com') or not isinstance(secret, str) or not secret:
+            raise ValueError()
+    except (ValueError, KeyError, TypeError):
+        raise ValueError('ใช้ไฟล์ OAuth JSON ชนิด Web application สำหรับเซิร์ฟเวอร์')
+    # Deliberately separate from the owner's existing Desktop client/token.
+    db.set_setting('google_server_config', {'client_id': client_id, 'client_secret': secret})
+    return {'ok': True}
 
 
 @app.post('/api/google/connect')
@@ -288,7 +345,9 @@ class Source(BaseModel):
 
 
 @app.post('/api/sources')
-def add_source(payload: Source):
+def add_source(payload: Source, request: Request):
+    if payload.kind == "local":
+        auth.require_admin(request)
     locator = payload.locator.strip().strip('"')
     if payload.kind == 'local':
         path = Path(locator).expanduser().resolve()

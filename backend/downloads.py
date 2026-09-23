@@ -45,6 +45,21 @@ class ZipBuffer:
 
 
 def archive(photos):
+    # Bind before returning the generator; streaming may outlive middleware.
+    scope = db.scope_key()
+    iterator = _archive(photos)
+    def scoped():
+        while True:
+            with db.workspace(scope):
+                try:
+                    chunk = next(iterator)
+                except StopIteration:
+                    return
+            yield chunk
+    return scoped()
+
+
+def _archive(photos):
     buffer = ZipBuffer()
     errors = []
     saved = 0

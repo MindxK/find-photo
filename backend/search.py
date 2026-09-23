@@ -7,12 +7,13 @@ from . import db, vision
 _lock = threading.Lock()
 _cached_revision = -1
 _cached_model = None
+_cached_scope = None
 _index = None
 _metadata = []
 
 
 def search(profile_id, threshold=0.65, source_id='', mode='all', offset=0, limit=24):
-    global _cached_revision, _cached_model, _index, _metadata
+    global _cached_revision, _cached_model, _cached_scope, _index, _metadata
     model = vision.model_version()
     refs = db.rows('SELECT embedding FROM refs WHERE profile_id=? AND model=?', (profile_id, model))
     if not refs:
@@ -21,7 +22,7 @@ def search(profile_id, threshold=0.65, source_id='', mode='all', offset=0, limit
     feedback = {r['face_id']: r['label'] for r in db.rows('SELECT * FROM feedback WHERE profile_id=?', (profile_id,))}
     with _lock:
         revision = db.revision
-        if _index is None or revision != _cached_revision or model != _cached_model:
+        if _index is None or revision != _cached_revision or model != _cached_model or db.scope_key() != _cached_scope:
             metadata = db.rows('''SELECT faces.id AS face_id,faces.embedding,faces.bbox,faces.quality,
                 files.id AS file_id,files.name,files.remote_id,files.source_id,sources.name AS source_name,sources.kind
                 FROM faces JOIN files ON files.id=faces.file_id JOIN sources ON sources.id=files.source_id
@@ -33,6 +34,7 @@ def search(profile_id, threshold=0.65, source_id='', mode='all', offset=0, limit
                 _index.add(vectors)
             _metadata = metadata
             _cached_revision, _cached_model = revision, model
+            _cached_scope = db.scope_key()
         # range_search has no top-k truncation. Exact cosine is intentional
         # for personal albums: returning every matching image matters.
         _, scores, indices = _index.range_search(queries, float(threshold - 1e-6))
