@@ -7,13 +7,13 @@ history.replaceState(null, '', '/login');
 $('#code').value = code;
 function render() {
   $('#title').textContent = setup ? 'สร้างบัญชีเจ้าของเซิร์ฟเวอร์' : mode === 'register' ? 'พื้นที่รูปภาพของคุณ' : 'ค้นหาทุกรูปที่มีคุณ';
-  $('#description').textContent = setup ? 'ตั้งชื่อบัญชีและรหัสผ่านสำหรับคุณ ข้อมูลเดิมในเครื่องจะอยู่ในบัญชีนี้' : mode === 'register' ? 'ใช้รหัสเชิญจากเจ้าของเซิร์ฟเวอร์เพื่อสร้างบัญชีส่วนตัว' : 'เข้าสู่ระบบเพื่อค้นหารูปและเชื่อมต่อ Google Drive ของคุณ';
-  $('#code-field').hidden = mode !== 'register';
-  $('#code').required = mode === 'register';
+  $('#description').textContent = setup ? 'ตั้งชื่อบัญชีและรหัสผ่านสำหรับคุณ ข้อมูลเดิมในเครื่องจะอยู่ในบัญชีนี้' : mode === 'register' ? 'ตั้งชื่อบัญชีและรหัสผ่าน เพื่อสร้างพื้นที่รูปภาพส่วนตัวของคุณ' : 'เข้าสู่ระบบเพื่อค้นหารูปและเชื่อมต่อ Google Drive ของคุณ';
+  $('#code-field').hidden = !setup;
+  $('#code').required = setup;
   $('#password').autocomplete = mode === 'register' ? 'new-password' : 'current-password';
   $('#submit').textContent = mode === 'register' ? 'สร้างบัญชีและเริ่มใช้งาน' : 'เข้าสู่ระบบ';
   $('#switch').hidden = setup;
-  $('#switch').textContent = mode === 'register' ? 'มีบัญชีแล้ว? เข้าสู่ระบบ' : 'มีรหัสเชิญ? สร้างบัญชีใหม่';
+  $('#switch').textContent = mode === 'register' ? 'มีบัญชีแล้ว? เข้าสู่ระบบ' : 'ยังไม่มีบัญชี? สร้างบัญชีใหม่';
 }
 $('#switch').addEventListener('click', () => { mode = mode === 'register' ? 'login' : 'register'; $('#error').hidden = true; render(); });
 $('#auth-form').addEventListener('submit', async event => {

@@ -1,4 +1,4 @@
-"""Invite-only accounts. Passwords and account metadata never enter workspace APIs."""
+"""Self-service accounts with protected owner setup. Passwords and account metadata never enter workspace APIs."""
 import hashlib
 import hmac
 import re
@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from . import db
-from .config import DATA, SERVER_MODE, public_origin
+from .config import DATA, SERVER_MODE
 
 router = APIRouter(prefix='/api/auth')
 ACCOUNTS = DATA / 'accounts.sqlite3'
@@ -127,11 +127,6 @@ def register(payload: Credentials, request: Request):
                 if (request.url.hostname not in ('localhost', '127.0.0.1') or not BOOTSTRAP.exists()
                         or not hmac.compare_digest(payload.code, BOOTSTRAP.read_text().strip())):
                     raise HTTPException(403, 'เปิดลิงก์ตั้งค่าบัญชีเจ้าของจากเครื่องเซิร์ฟเวอร์')
-            else:
-                digest = hashlib.sha256(payload.code.encode()).hexdigest()
-                invite = c.execute('SELECT * FROM invites WHERE digest=? AND used=0 AND expires>?', (digest, time.time())).fetchone()
-                if not invite:
-                    raise HTTPException(403, 'รหัสเชิญไม่ถูกต้อง หมดอายุ หรือถูกใช้แล้ว')
             user_id = secrets.token_hex(16)
             scope = 'legacy' if first else user_id
             try:
@@ -140,8 +135,6 @@ def register(payload: Credentials, request: Request):
                 raise ValueError('ชื่อบัญชีนี้ถูกใช้แล้ว')
             with db.workspace(scope):
                 db.init()
-            if not first:
-                c.execute('UPDATE invites SET used=1 WHERE digest=?', (digest,))
         if first:
             BOOTSTRAP.unlink(missing_ok=True)
     request.state.login_user = user_id
@@ -166,14 +159,3 @@ def login(payload: Credentials, request: Request):
 def logout(request: Request):
     request.state.logout = True
     return {'ok': True}
-
-
-@router.post('/invites')
-def invite(request: Request):
-    require_admin(request)
-    code = secrets.token_urlsafe(24)
-    with connect() as c:
-        c.execute('DELETE FROM invites WHERE expires<? OR used=1', (time.time(),))
-        c.execute('INSERT INTO invites VALUES(?,?,0)', (hashlib.sha256(code.encode()).hexdigest(), time.time()+86400))
-    return {'code': code, 'url': (public_origin() or str(request.base_url).rstrip('/')) + '/login#invite=' + code,
-            'expires_in': 86400}

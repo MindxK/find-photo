@@ -19,10 +19,13 @@ def refresh(client):
     return info
 
 
-def signup(client, name, code):
+def signup(client, name, code=None):
     client.get('/login')
     refresh(client)
-    response = client.post('/api/auth/register', json={'username': name, 'password': 'Long-test-password-123!', 'code': code})
+    payload = {'username': name, 'password': 'Long-test-password-123!'}
+    if code is not None:
+        payload['code'] = code
+    response = client.post('/api/auth/register', json=payload)
     assert response.status_code == 200, response.text
     return refresh(client)['user']
 
@@ -37,16 +40,14 @@ def accounts(client, monkeypatch, tmp_path):
     auth.init()
     owner = signup(client, 'owner', auth.BOOTSTRAP.read_text())
     other = TestClient(application.app, base_url=ORIGIN)
-    code = client.post('/api/auth/invites').json()['code']
-    member = signup(other, 'member', code)
+    member = signup(other, 'member')
     yield client, other, owner, member
     other.close()
     auth._attempts.clear()
 
 
-def test_login_sessions_csrf_and_invites(accounts):
+def test_login_sessions_csrf_and_open_registration(accounts):
     owner, member, _, _ = accounts
-    assert member.post('/api/auth/invites').status_code == 403
     assert member.post('/api/model/install').status_code == 403
     assert member.post('/api/sources', json={'name':'private', 'kind':'local', 'locator':'.'}).status_code == 403
     stale = member.cookies.get('findface_session')
@@ -65,12 +66,18 @@ def test_login_sessions_csrf_and_invites(accounts):
     assert member.get('/api/status').json()['user']['username'] == 'member'
     assert member.post('/api/auth/logout', headers={'Origin':'https://evil.example'}).status_code == 403
     assert member.post('/api/auth/logout', headers={'X-CSRF-Token':'bad'}).status_code == 403
-    invitation = owner.post('/api/auth/invites').json()['code']
     third = TestClient(application.app, base_url=ORIGIN)
-    signup(third, 'third', invitation)
+    third_user = signup(third, 'third')
+    assert third_user['admin'] == 0
+    assert third_user['scope'] != 'legacy'
     fourth = TestClient(application.app, base_url=ORIGIN)
     fourth.get('/login'); refresh(fourth)
-    assert fourth.post('/api/auth/register', json={'username':'fourth','password':'Long-test-password-123!','code':invitation}).status_code == 403
+    payload = {'username':'third','password':'Long-test-password-123!'}
+    assert fourth.post('/api/auth/register', json=payload).status_code == 400
+    payload['username'] = 'fourth'
+    assert fourth.post('/api/auth/register', json=payload, headers={'X-CSRF-Token':'bad'}).status_code == 403
+    fourth_user = signup(fourth, 'fourth')
+    assert fourth_user['scope'] != third_user['scope']
     with auth.connect() as c:
         hashes = [r[0] for r in c.execute('SELECT password FROM users')]
     assert len(set(hashes)) == len(hashes)
@@ -255,3 +262,20 @@ def test_planned_restart_resumes_only_selected_interrupted_jobs(accounts, monkey
     assert len(calls)==2
     report=json.loads((DATA/'resumed-scans.json').read_text())
     assert [row['status'] for row in report]==['resumed','resumed','skipped','rejected']
+
+
+def test_owner_setup_still_requires_local_secret(client, monkeypatch, tmp_path):
+    for module in (application, auth, db, drive):
+        monkeypatch.setattr(module, 'SERVER_MODE', True)
+    monkeypatch.setattr(auth, 'ACCOUNTS', tmp_path / 'accounts.sqlite3')
+    monkeypatch.setattr(auth, 'BOOTSTRAP', tmp_path / 'setup.txt')
+    auth._attempts.clear()
+    auth.init()
+    refresh(client)
+    payload = {'username':'owner','password':'Long-test-password-123!'}
+    assert client.post('/api/auth/register', json=payload).status_code == 403
+    assert not auth.owner_exists()
+    owner = signup(client, 'owner', auth.BOOTSTRAP.read_text())
+    assert owner['admin'] == 1 and owner['scope'] == 'legacy'
+    assert not auth.BOOTSTRAP.exists()
+    auth._attempts.clear()
