@@ -117,7 +117,11 @@ function resultsContent() {
   if (state.searching) return '<div class="loading-box" role="status"><span class="spinner"></span>กำลังค้นหาใบหน้าในคลังรูป…</div>';
   if (!state.results) return empty('พร้อมค้นหาความทรงจำของคุณ', 'เพิ่มใบหน้าอ้างอิงและสแกนอัลบั้ม แล้วกดค้นหา รูปที่มีคุณจะปรากฏตรงนี้', 'scan');
   if (!state.results.total) return empty('ยังไม่พบรูปที่ตรงกัน', 'ลองเลือกอัลบั้มอื่น ลดค่าความคล้าย หรือเพิ่มภาพอ้างอิงที่เห็นใบหน้าชัดเจน', 'search');
-  return `<div class="gallery">${state.results.items.map((photo,i)=>`<button class="photo-card" data-action="open-photo" data-index="${i}" aria-label="ดูรูป ${E(photo.name)}"><div class="photo-frame"><img src="/api/files/${photo.file_id}/preview" alt="${E(photo.name)}" loading="lazy"><span class="photo-score">${photo.similarity.toFixed(3)}</span></div><div class="photo-caption"><strong>${E(photo.name)}</strong><div><small>${E(photo.source_name)}</small><span class="pill ${photo.faces[0].state==='review'?'amber':''}">${photo.faces[0].state==='rejected'?'ไม่ใช่':photo.faces[0].state==='confirmed'?'ยืนยันแล้ว':photo.faces[0].state==='review'?'รอตรวจสอบ':'ใบหน้าคล้าย'}</span></div></div></button>`).join('')}</div><div class="pagination"><button class="button secondary small" data-action="previous-page" ${state.offset===0?'disabled':''}>ก่อนหน้า</button><span>${Math.floor(state.offset/24)+1} / ${Math.ceil(state.results.total/24)}</span><button class="button secondary small" data-action="next-page" ${state.offset+24>=state.results.total?'disabled':''}>ถัดไป</button></div>`;
+  const limit=state.results.limit||24;
+  const offset=state.results.offset;
+  const lastOffset=Math.max(0,(Math.ceil(state.results.total/limit)-1)*limit);
+  const downloadQuery=new URLSearchParams(state.resultQuery||{});
+  return `<div class="result-actions"><a class="button secondary small" href="/api/search/download?${E(downloadQuery)}" download="FindFace-photos.zip" target="_blank" rel="noopener noreferrer">${icon('download')}ดาวน์โหลดทั้งหมด (${number(state.results.total)} รูป) · ZIP</a><small>รูปต้นฉบับตามตัวกรองนี้ทุกหน้า · ดูความคืบหน้าในรายการดาวน์โหลดของเบราว์เซอร์</small></div><div class="gallery">${state.results.items.map((photo,i)=>`<button class="photo-card" data-action="open-photo" data-index="${i}" aria-label="ดูรูป ${E(photo.name)}"><div class="photo-frame"><img src="/api/files/${photo.file_id}/preview" alt="${E(photo.name)}" loading="lazy"><span class="photo-score">${photo.similarity.toFixed(3)}</span></div><div class="photo-caption"><strong>${E(photo.name)}</strong><div><small>${E(photo.source_name)}</small><span class="pill ${photo.faces[0].state==='review'?'amber':''}">${photo.faces[0].state==='rejected'?'ไม่ใช่':photo.faces[0].state==='confirmed'?'ยืนยันแล้ว':photo.faces[0].state==='review'?'รอตรวจสอบ':'ใบหน้าคล้าย'}</span></div></div></button>`).join('')}</div><nav class="pagination" aria-label="หน้าผลการค้นหา"><button class="button secondary small" data-action="first-page" ${offset===0?'disabled':''}>หน้าแรก</button><button class="button secondary small" data-action="previous-page" ${offset===0?'disabled':''}>ก่อนหน้า</button><span aria-live="polite">${Math.floor(offset/limit)+1} / ${Math.ceil(state.results.total/limit)}</span><button class="button secondary small" data-action="next-page" ${offset>=lastOffset?'disabled':''}>ถัดไป</button><button class="button secondary small" data-action="last-page" ${offset>=lastOffset?'disabled':''}>หน้าสุดท้าย</button></nav>`;
 }
 function renderProfiles() {
   return pageHead('ใบหน้าอ้างอิง', 'ใช้ภาพที่เห็นใบหน้าชัดเจนหลายมุม เพื่อให้ค้นหารูปของคุณได้ดีขึ้น', `<button class="button" data-action="add-profile">${icon('plus')}เพิ่มใบหน้า</button>`) +
@@ -174,7 +178,10 @@ async function runSearch(reset=true) {
   try {
     const query=new URLSearchParams({profile_id:state.selectedProfile,threshold:state.threshold,source_id:state.selectedSource,mode:state.mode,offset:state.offset});
     const result=await api('/search?'+query);
-    if (sequence===searchSequence) state.results=result;
+    if (sequence===searchSequence) {
+      state.results=result;state.offset=result.offset;
+      query.delete('offset');state.resultQuery=Object.fromEntries(query);
+    }
   } finally {
     if (sequence===searchSequence) {
       state.searching=false;
@@ -262,8 +269,17 @@ async function saveSource(){
 
 function openPhoto(index){
   const photo=state.results?.items[index];if(!photo)return;
-  openModal(`<div class="photo-detail"><div class="photo-view"><div class="photo-image-wrap"><img id="detail-image" src="/api/files/${photo.file_id}/preview" alt="${E(photo.name)}"><div id="face-boxes"></div></div></div><aside class="photo-detail-side"><div style="display:flex;justify-content:space-between;align-items:center"><span class="pill">ผลการค้นหา</span><button class="icon-button" data-action="close-modal" aria-label="ปิด">${icon('close')}</button></div><h3 id="modal-title">${E(photo.name)}</h3><p>${E(photo.source_name)}</p><div id="detail-face"></div>${photo.drive_url?`<a class="button secondary small" style="margin-top:auto" href="${E(photo.drive_url)}" target="_blank" rel="noopener noreferrer">${icon('link')}เปิดใน Google Drive</a>`:''}</aside></div>`,true);
+  openModal(`<div class="photo-detail"><div class="photo-view"><div class="photo-image-wrap"><img id="detail-image" src="/api/files/${photo.file_id}/preview" alt="${E(photo.name)}"><div id="face-boxes"></div></div></div><aside class="photo-detail-side"><div style="display:flex;justify-content:space-between;align-items:center"><span class="pill">ผลการค้นหา</span><button class="icon-button" data-action="close-modal" aria-label="ปิด">${icon('close')}</button></div><h3 id="modal-title">${E(photo.name)}</h3><p>${E(photo.source_name)}</p><div id="detail-face"></div><button class="button secondary small" style="margin:12px 0" data-action="download-photo">${icon('download')}ดาวน์โหลดรูปต้นฉบับ</button>${photo.drive_url?`<a class="button secondary small" style="margin-top:auto" href="${E(photo.drive_url)}" target="_blank" rel="noopener noreferrer">${icon('link')}เปิดใน Google Drive</a>`:''}</aside></div>`,true);
   state.detail=photo;state.detailFace=0;renderDetailFace();
+}
+async function downloadPhoto(){
+  const photo=state.detail;if(!photo)return;
+  const response=await fetch('/api/files/'+encodeURIComponent(photo.file_id)+'/download');
+  if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.detail||'ดาวน์โหลดรูปไม่ได้ กรุณาลองใหม่');}
+  const url=URL.createObjectURL(await response.blob());
+  const link=document.createElement('a');link.href=url;link.download=photo.name;document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  toast('ส่งรูปต้นฉบับไปยังรายการดาวน์โหลดแล้ว');
 }
 function renderDetailFace(){
   const photo=state.detail;if(!photo)return;const face=photo.faces[state.detailFace];
@@ -302,8 +318,11 @@ document.addEventListener('click',async event=>{
       case 'connect':await connectGoogle();break;
       case 'search':await runSearch();break;
       case 'filter':state.mode=button.dataset.mode;$$('.tab').forEach(b=>b.classList.toggle('active',b.dataset.mode===state.mode));if(state.results)await runSearch();break;
-      case 'next-page':state.offset+=24;await runSearch(false);break;
-      case 'previous-page':state.offset=Math.max(0,state.offset-24);await runSearch(false);break;
+      case 'first-page':state.offset=0;await runSearch(false);break;
+      case 'last-page':state.offset=Math.max(0,(Math.ceil(state.results.total/(state.results.limit||24))-1)*(state.results.limit||24));await runSearch(false);break;
+      case 'next-page':state.offset+=(state.results.limit||24);await runSearch(false);break;
+      case 'previous-page':state.offset=Math.max(0,state.offset-(state.results.limit||24));await runSearch(false);break;
+      case 'download-photo':await downloadPhoto();break;
       case 'search-profile':state.selectedProfile=button.dataset.id;state.results=null;navigate('search');await runSearch();break;
       case 'delete-profile':if(await confirmAction('ลบโปรไฟล์นี้พร้อมเวกเตอร์อ้างอิงและผลยืนยันทั้งหมด? ภาพต้นฉบับไม่ถูกลบ','ลบโปรไฟล์')){await api('/profiles/'+button.dataset.id,{method:'DELETE'});state.results=null;await refreshData();render();toast('ลบโปรไฟล์แล้ว');}break;
       case 'delete-source':if(await confirmAction('นำอัลบั้มนี้และเวกเตอร์ใบหน้าทั้งหมดออกจากระบบ? ภาพต้นฉบับยังอยู่ที่เดิม','นำอัลบั้มออก')){await api('/sources/'+button.dataset.id,{method:'DELETE'});state.results=null;await refreshData();render();toast('นำอัลบั้มออกแล้ว');}break;

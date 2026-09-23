@@ -12,11 +12,11 @@ import uuid
 import httpx
 import numpy as np
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from . import db, drive, jobs, models, search, vision
+from . import db, downloads, drive, jobs, models, search, vision
 from .config import ROOT, ORIGIN, CALLBACK, MAX_BYTES, MODEL_NAME
 
 _sessions = {}
@@ -343,9 +343,34 @@ def issues(source_id: str = ''):
 
 @app.get('/api/search')
 def search_faces(profile_id: str, threshold: float = 0.65, source_id: str = '', mode: str = 'all', offset: int = 0):
+    validate_search(threshold, mode, offset)
+    return search.search(profile_id, threshold, source_id, mode, offset)
+
+
+def validate_search(threshold, mode, offset=0):
     if not 0.3 <= threshold <= 0.95 or mode not in ('all', 'review', 'confirmed', 'match', 'rejected') or offset < 0:
         raise ValueError('ตัวเลือกการค้นหาไม่ถูกต้อง')
-    return search.search(profile_id, threshold, source_id, mode, offset)
+
+
+@app.get('/api/search/download')
+def download_results(profile_id: str, threshold: float = 0.65, source_id: str = '', mode: str = 'all'):
+    validate_search(threshold, mode)
+    result = search.search(profile_id, threshold, source_id, mode, limit=None)
+    if not result['total']:
+        raise ValueError('ไม่มีรูปในผลค้นหานี้สำหรับดาวน์โหลด')
+    return StreamingResponse(downloads.archive(result['items']), media_type='application/zip',
+                             headers={'Content-Disposition': downloads.attachment('FindFace-photos.zip')})
+
+
+@app.get('/api/files/{file_id}/download')
+def download_photo(file_id: str):
+    with _preview_slots:
+        try:
+            data, name = downloads.original(file_id)
+        except (ValueError, OSError, httpx.RequestError):
+            return JSONResponse({'detail': 'ดาวน์โหลดรูปไม่ได้ กรุณาตรวจไฟล์ต้นทางหรือการเชื่อมต่อ Google Drive'}, status_code=404)
+    return Response(data, media_type='application/octet-stream',
+                    headers={'Content-Disposition': downloads.attachment(name)})
 
 
 @app.get('/api/files/{file_id}/preview')

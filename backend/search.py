@@ -66,4 +66,6 @@ def search(profile_id, threshold=0.65, source_id='', mode='all', offset=0, limit
         results = sorted(photos.values(), key=lambda r: (-r['similarity'], r['file_id']))
         for photo in results:
             photo['faces'].sort(key=lambda r: -r['similarity'])
-        return {'total': len(results), 'items': results[offset:offset+limit], 'offset': offset, 'limit': limit}
+        if limit is not None:
+            offset = min(offset, max(0, (len(results) - 1) // limit * limit))
+        return {'total': len(results), 'items': results[offset:] if limit is None else results[offset:offset+limit], 'offset': offset, 'limit': limit}

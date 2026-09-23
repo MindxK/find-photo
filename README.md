@@ -51,6 +51,8 @@ uv pip install --python .venv/Scripts/python.exe --cache-dir .uv-cache -r requir
 - สแกนซ้ำจะอ่าน metadata ใหม่และประมวลผลเฉพาะไฟล์ที่เปลี่ยน ล้างไฟล์ที่ถูกลบเมื่อ enumeration สำเร็จครบเท่านั้น
 - FAISS `IndexFlatIP.range_search` บน L2-normalized vectors คืนทุกภาพผ่าน threshold ไม่มี top-k ตัดผลหาย
 - รวมผลตามภาพ แต่เก็บ bounding box และ feedback รายใบหน้า
+- ผลค้นหามีปุ่มหน้าแรก/ก่อนหน้า/ถัดไป/หน้าสุดท้าย และดาวน์โหลดรูปต้นฉบับทีละรูปจากหน้ารายละเอียด
+- ดาวน์โหลดผลค้นหาทุกหน้าตามตัวกรองเป็น ZIP แบบ streaming โดยไม่สร้างสำเนาบนเซิร์ฟเวอร์ มี `download-report.txt` บอกจำนวนที่สำเร็จและรูปที่อ่านไม่ได้ใน ZIP
 - Similarity และสถานะ review/confirmed แยกกัน ไม่แสดงคะแนนเป็นเปอร์เซ็นต์ความแม่นยำ
 - เลือกยืนยันและเพิ่ม reference ได้ไม่เกิน 12 เวกเตอร์ต่อโปรไฟล์ ไม่ fine-tune encoder อัตโนมัติ
 - Google OAuth state + PKCE, session cookie, CSRF check, Host validation, ไม่บันทึก query string OAuth ใน access log
@@ -119,3 +121,5 @@ Tests ใช้ฐานข้อมูลชั่วคราวและ embe
 `requirements.lock` เก็บเวอร์ชันที่ทดสอบบนเครื่องนี้ หากต้องการตรวจโมเดลจริงแบบครบขั้นตอนบนฐานข้อมูลชั่วคราว ใช้ `scripts/verify_inference.py --image <ภาพทดสอบที่มีสิทธิ์ใช้และมีใบหน้าเดียว>` สคริปต์จะตรวจลงทะเบียน, สแกน, ภาพหมู่, ค้นหา, preview, feedback และการลบดัชนี โดยไม่แตะบัญชี Google หรือข้อมูลใช้งานจริง การใช้ภาพเดียวที่ปรับแสง/ขนาดเป็นเพียง smoke test ไม่ใช่การประเมินความแม่นยำข้ามบุคคล
 
 สำหรับการเปิดให้หลายคนใช้ ต้องเพิ่ม authentication/authorization รายผู้ใช้, tenant isolation, durable queue, HTTPS, deployment secrets, retention และการประเมิน threshold ก่อนเปิดใช้งาน ห้ามเปลี่ยน bind เป็น `0.0.0.0` แล้วถือว่าเป็นระบบ production
+
+ทดสอบปุ่มแบ่งหน้าและลิงก์ดาวน์โหลดบนเว็บด้วย `node --test tests/test_web.cjs` (ใช้ Node.js)

@@ -211,3 +211,88 @@ def test_bad_image_and_zero_vector_rejected():
         assert False
     except ValueError:
         pass
+
+
+
+def test_last_page_clamps_after_result_count_changes(client):
+    seed_profile();seed_photos(49)
+    page = client.get('/api/search?profile_id=p&offset=480').json()
+    assert page['offset'] == 48
+    assert len(page['items']) == 1
+
+
+def test_download_original_and_requires_session(client, monkeypatch):
+    seed_photos()
+    original = b'original-image-bytes-not-a-thumbnail'
+    monkeypatch.setattr(jobs, 'get_bytes', lambda source, item: original)
+    db.execute('UPDATE files SET name=? WHERE id=?', ('รูปทดสอบ.png', 'file0'))
+    response = client.get('/api/files/file0/download')
+    assert response.status_code == 200
+    assert response.content == original
+    from urllib.parse import unquote
+    assert 'รูปทดสอบ.png' in unquote(response.headers['content-disposition'])
+    assert response.headers['cache-control'] == 'no-store'
+    assert client.get('/api/files/missing/download').status_code == 404
+    client.cookies.clear()
+    assert client.get('/api/files/file0/download').status_code == 401
+    assert client.get('/api/search/download?profile_id=p').status_code == 401
+
+
+def test_zip_download_includes_every_page_and_reports_missing_files(client, monkeypatch):
+    import zipfile
+    seed_profile();seed_photos(30)
+    db.execute('UPDATE files SET name=?', ('../รูปซ้ำ.jpg',))
+    def read(source, item):
+        if item['id'] == 'remote5':
+            raise OSError('private path should not be exported')
+        return item['id'].encode()
+    monkeypatch.setattr(jobs, 'get_bytes', read)
+    response = client.get('/api/search/download?profile_id=p')
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'application/zip'
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.testzip() is None
+        names = archive.namelist()
+        assert len(names) == len(set(names)) == 30
+        photos = [name for name in names if name != 'download-report.txt']
+        assert all('/' not in name and chr(92) not in name for name in photos)
+        assert {archive.read(name) for name in photos} == {f'remote{i}'.encode() for i in range(30) if i != 5}
+        report = archive.read('download-report.txt').decode('utf-8-sig')
+        assert 'ดาวน์โหลดสำเร็จ: 29' in report
+        assert 'ดาวน์โหลดไม่ได้: 1' in report
+        assert 'private path' not in report
+
+
+def test_zip_download_obeys_filters_and_rejects_invalid_options(client, monkeypatch):
+    import zipfile
+    seed_profile();seed_photos(3)
+    monkeypatch.setattr(jobs, 'get_bytes', lambda source, item: item['id'].encode())
+    client.post('/api/feedback', json={'profile_id':'p','face_id':'face1','label':'yes'})
+    client.post('/api/feedback', json={'profile_id':'p','face_id':'face2','label':'no'})
+    for mode, expected in [('all', {b'remote0', b'remote1'}), ('confirmed', {b'remote1'}), ('rejected', {b'remote2'})]:
+        response = client.get('/api/search/download', params={'profile_id':'p','mode':mode,'source_id':'s'})
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert {archive.read(n) for n in archive.namelist() if n != 'download-report.txt'} == expected
+    for suffix in ['&source_id=missing', '&threshold=2', '&mode=invalid']:
+        assert client.get('/api/search/download?profile_id=p'+suffix).status_code == 400
+
+
+def test_download_respects_local_source_boundary(client, tmp_path):
+    seed_photos()
+    root = tmp_path / 'album';root.mkdir()
+    outside = tmp_path / 'private.jpg';outside.write_bytes(b'private')
+    db.execute('UPDATE sources SET locator=?', (str(root),))
+    db.execute('UPDATE files SET remote_id=?', (str(outside),))
+    assert client.get('/api/files/file0/download').status_code == 404
+
+
+def test_drive_original_download_uses_drive_reader(client, monkeypatch):
+    seed_photos()
+    db.execute("UPDATE sources SET kind='drive'")
+    mock = Mock()
+    mock.download.return_value = b'drive-original'
+    monkeypatch.setattr(jobs, 'Drive', lambda: mock)
+    response = client.get('/api/files/file0/download')
+    assert response.content == b'drive-original'
+    mock.download.assert_called_once_with('remote0')
+    mock.close.assert_called_once()
