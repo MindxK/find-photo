@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#122d30">
+  <meta name="description" content="FindFace ค้นหารูปของคุณจาก Google Drive ด้วยใบหน้า ประมวลผลบนเครื่องของคุณ">
+  <title>FindFace — ค้นหารูปของคุณ</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">ข้ามไปเนื้อหา</a>
+  <aside class="sidebar">
+    <a class="brand" href="#search"><img src="/static/favicon.svg" alt="" width="40" height="40"><span>findface<span class="brand-dot">.</span></span></a>
+    <div class="workspace-label">พื้นที่ส่วนตัวของคุณ</div>
+    <nav aria-label="เมนูหลัก">
+      <a href="#search" data-view="search"><span data-icon="search"></span>ค้นหารูปของฉัน</a>
+      <a href="#profiles" data-view="profiles"><span data-icon="user"></span>ใบหน้าอ้างอิง <span class="nav-count" id="nav-profiles">0</span></a>
+      <a href="#albums" data-view="albums"><span data-icon="folder"></span>อัลบั้มรูป</a>
+      <a href="#activity" data-view="activity"><span data-icon="activity"></span>ประวัติการสแกน</a>
+      <div class="nav-separator"></div>
+      <a href="#settings" data-view="settings"><span data-icon="settings"></span>ตั้งค่าการเชื่อมต่อ</a>
+    </nav>
+    <div class="sidebar-bottom"><div class="privacy-symbol" data-icon="shield"></div><strong>รูปของคุณ อยู่กับคุณ</strong><p>ประมวลผลบนเครื่องนี้<br>เก็บเฉพาะเวกเตอร์ใบหน้า</p><span class="local-label"><span></span> LOCAL WORKSPACE</span></div>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar"><div class="breadcrumb">พื้นที่ทำงาน <span>/</span> <strong id="breadcrumb-current">ค้นหารูปของฉัน</strong></div><div class="topbar-right"><span class="local-indicator"><span data-icon="monitor"></span>บนเครื่องนี้</span><button class="button secondary small" id="header-drive" data-action="connect"><span data-icon="drive"></span>เชื่อมต่อ Google Drive</button></div></header>
+    <main id="main" tabindex="-1">
+      <div id="connection-error" class="notice error hidden" role="alert"></div>
+      <div id="page"></div>
+      <footer>FindFace <span>·</span> ค้นหาความทรงจำ ผ่านใบหน้าที่คุ้นเคย <span class="footer-right">ภาพต้นฉบับไม่ถูกคัดลอกมาเก็บในระบบ</span></footer>
+    </main>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div id="modal-body"></div></dialog>
+  <dialog id="confirm-modal" aria-labelledby="confirm-title"><div class="modal-content"><div class="modal-icon warning" data-icon="alert"></div><h2 id="confirm-title">ยืนยันการทำรายการ</h2><p id="confirm-message"></p><div class="modal-actions"><button class="button secondary" id="confirm-no">ยกเลิก</button><button class="button danger" id="confirm-yes">ยืนยัน</button></div></div></dialog>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
