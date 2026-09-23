@@ -6,7 +6,7 @@ import re
 import secrets
 import threading
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 import httpx
 from . import db
 from .config import CALLBACK, MAX_BYTES, SERVER_MODE
@@ -195,6 +195,33 @@ class Drive:
 
     def download(self, file_id):
         return self.request('/files/' + safe_id(file_id), {'alt': 'media', 'supportsAllDrives': 'true'}, media=True)
+
+    def thumbnail(self, file_id):
+        """Fetch private Drive thumbnails through our authenticated proxy only."""
+        metadata = self.request('/files/' + safe_id(file_id),
+                                {'fields': 'thumbnailLink', 'supportsAllDrives': 'true'})
+        link = metadata.get('thumbnailLink')
+        if not link:
+            return None
+        url = urlsplit(link)
+        # Never forward a Google token to arbitrary metadata URLs or redirects.
+        if (url.scheme != 'https' or not url.hostname
+                or not url.hostname.endswith('.googleusercontent.com')
+                or url.username or url.password or url.port not in (None, 443)):
+            return None
+        link = re.sub(r'=s[0-9]+$', '=s480', link)
+        with self.client.stream('GET', link, headers={'Authorization': 'Bearer ' + access_token()},
+                                timeout=20, follow_redirects=False) as response:
+            if response.status_code != 200:
+                return None
+            if int(response.headers.get('content-length', '0')) > 4 * 1024 * 1024:
+                return None
+            content = bytearray()
+            for chunk in response.iter_bytes(64 * 1024):
+                content.extend(chunk)
+                if len(content) > 4 * 1024 * 1024:
+                    return None
+            return bytes(content) or None
 
     def drives(self):
         found, token = [], None

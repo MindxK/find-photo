@@ -14,8 +14,10 @@ import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+from typing import Literal
 from pydantic import BaseModel, Field
-from . import auth, db, downloads, drive, jobs, models, search, vision
+from . import auth, db, downloads, drive, jobs, models, previews, search, vision
 from .config import ROOT, ORIGIN, CALLBACK, MAX_BYTES, MODEL_NAME, SERVER_MODE, public_origin
 from urllib.parse import urlsplit
 
@@ -25,6 +27,7 @@ _preview_slots = threading.BoundedSemaphore(3)
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.preview_slots = asyncio.Semaphore(6)
     if SERVER_MODE:
         auth.init()
         jobs.resume_after_restart()
@@ -434,15 +437,12 @@ def download_photo(file_id: str):
 
 
 @app.get('/api/files/{file_id}/preview')
-def preview(file_id: str):
-    file = db.one('SELECT * FROM files WHERE id=?', (file_id,))
-    if not file:
-        return Response(status_code=404)
-    source = db.one('SELECT * FROM sources WHERE id=?', (file['source_id'],))
-    with _preview_slots:
+async def preview(file_id: str, request: Request, size: Literal['grid', 'detail'] = 'detail'):
+    # Waiting previews must not occupy the shared API worker pool.
+    async with request.app.state.preview_slots:
         try:
-            data = jobs.get_bytes(source, {'id': file['remote_id']})
-            return Response(vision.thumbnail(data), media_type='image/jpeg')
+            data = await run_in_threadpool(previews.get, file_id, size)
+            return Response(data, media_type='image/jpeg')
         except (ValueError, OSError, httpx.RequestError):
             return Response(status_code=404)
 

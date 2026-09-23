@@ -102,10 +102,10 @@ def analyze(data, registration=False):
     return {'faces': accepted, 'detected': len(boxes), 'width': width, 'height': height}
 
 
-def thumbnail(data):
+def thumbnail(data, size=1600, quality=86):
     bgr = decode(data)
     image = Image.fromarray(bgr[:, :, ::-1])
-    image.thumbnail((1600, 1600))
+    image.thumbnail((size, size))
     buffer = io.BytesIO()
-    image.save(buffer, format='JPEG', quality=86)
+    image.save(buffer, format='JPEG', quality=quality)
     return buffer.getvalue()
